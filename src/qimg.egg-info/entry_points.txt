@@ -1,0 +1,2 @@
+[console_scripts]
+qimg = qimg.cli:app

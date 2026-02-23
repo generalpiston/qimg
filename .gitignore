@@ -1,0 +1,23 @@
+# # Local models and artifacts
+# models/
+
+# Python caches/bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+
+# Test and tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Coverage outputs
+.coverage
+htmlcov/
+
+# OS/editor noise
+.DS_Store

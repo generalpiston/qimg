@@ -1,0 +1,25 @@
+---
+name: "qimg-facts-extraction"
+description: "Extract caption/tags/objects/ocr facts for selected qimg assets."
+allowed-tools:
+  - "mcp__qimg__qimg_status"
+  - "mcp__qimg__qimg_facts_extract"
+  - "mcp__qimg__qimg_facts_get"
+---
+
+# Qimg Facts Extraction
+
+## When to use
+
+Use this skill when the user asks to enrich assets with machine-generated facts.
+
+## Workflow
+
+1. Check readiness with `qimg_status`.
+2. Run `qimg_facts_extract` with only requested flags (`caption`, `tags`, `objects`, `ocr`).
+3. Confirm results using `qimg_facts_get`.
+
+## Guardrails
+
+- Do not extract all channels unless requested.
+- Keep requests scoped to provided ids/paths when possible.

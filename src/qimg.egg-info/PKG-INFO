@@ -1,0 +1,297 @@
+Metadata-Version: 2.4
+Name: qimg
+Version: 0.1.0
+Summary: Query Images - local-first image search CLI
+Author: qimg contributors
+License: MIT
+Requires-Python: <3.14,>=3.13
+Description-Content-Type: text/markdown
+Requires-Dist: typer>=0.12.3
+Requires-Dist: rich>=13.7.0
+Requires-Dist: PyYAML>=6.0.1
+Requires-Dist: Pillow>=10.3.0
+Requires-Dist: ImageHash>=4.3.1
+Requires-Dist: numpy>=2.0.0
+Requires-Dist: pydantic>=2.8.2
+Provides-Extra: hnsw
+Requires-Dist: hnswlib>=0.8.0; extra == "hnsw"
+Provides-Extra: encoder
+Requires-Dist: torch>=2.4.0; extra == "encoder"
+Requires-Dist: transformers>=4.48.0; extra == "encoder"
+Requires-Dist: huggingface_hub>=0.30.0; extra == "encoder"
+Requires-Dist: safetensors>=0.5.0; extra == "encoder"
+Requires-Dist: sentencepiece>=0.2.0; extra == "encoder"
+Requires-Dist: protobuf>=5.27.0; extra == "encoder"
+Provides-Extra: openclip
+Requires-Dist: torch>=2.4.0; extra == "openclip"
+Provides-Extra: ocr
+Requires-Dist: pytesseract>=0.3.10; extra == "ocr"
+Provides-Extra: exif
+Requires-Dist: piexif>=1.1.3; extra == "exif"
+Provides-Extra: test
+Requires-Dist: pytest>=8.2.0; extra == "test"
+Provides-Extra: finetune
+Requires-Dist: torch>=2.4.0; extra == "finetune"
+Requires-Dist: transformers>=4.48.0; extra == "finetune"
+Requires-Dist: huggingface_hub>=0.30.0; extra == "finetune"
+Requires-Dist: safetensors>=0.5.0; extra == "finetune"
+Requires-Dist: sentencepiece>=0.2.0; extra == "finetune"
+Requires-Dist: protobuf>=5.27.0; extra == "finetune"
+
+# qimg
+
+`qimg` is a local-first image retrieval CLI and MCP server with strict separation between:
+
+1. Contexts (human-authored priors)
+2. Facts (machine-extracted attributes)
+3. Embeddings (dense vectors)
+4. Core metadata (file/path/mtime/size/dimensions/hashes)
+
+This separation keeps retrieval interpretable and lets you tune ranking behavior channel-by-channel.
+
+## Requirements
+
+- Python `3.13`
+- `uv`
+- macOS/Linux (Windows untested)
+
+## Quickstart
+
+```bash
+cd qimg
+uv python install 3.13
+uv sync --python 3.13 --extra test
+```
+
+Optional extras:
+
+```bash
+uv sync --python 3.13 --extra test --extra hnsw
+uv sync --python 3.13 --extra test --extra encoder
+uv sync --python 3.13 --extra test --extra ocr
+```
+
+Initialize default config:
+
+```bash
+uv run qimg init-config
+```
+
+## Concepts
+
+### Contexts (human)
+
+- Added by users, attached to virtual paths: `qimg://<collection>/<prefix>`
+- Inherited down the path tree
+- Stable semantic priors
+
+```bash
+uv run qimg context add qimg://photos "Family photos"
+uv run qimg context add qimg://photos/2024 "Japan trip"
+uv run qimg context list
+```
+
+### Facts (machine)
+
+- Mutable/recomputable with provenance (`source`)
+- Includes: `caption`, `tag`, `object`, `ocr`, `exif`, `derived`
+- Never stored as contexts
+
+```bash
+uv run qimg facts extract --caption --tags --objects --ocr
+uv run qimg facts ls '#00000a'
+uv run qimg facts rm --source heuristic_labels@1.0
+```
+
+## Basic Flow
+
+```bash
+uv run qimg collection add ./sample_images --name sample --mask "**/*.{jpg,jpeg,png,webp,heic}"
+uv run qimg context add qimg://sample "Sample images"
+uv run qimg update
+uv run qimg facts extract --caption --tags
+uv run qimg embed
+uv run qimg search "kitchen" -n 5
+uv run qimg query "minimalist white kitchen" -n 5 --debug
+```
+
+## Commands
+
+### Collections
+
+```bash
+uv run qimg collection list
+uv run qimg collection rename sample photos
+uv run qimg collection remove photos
+```
+
+### Indexing
+
+```bash
+uv run qimg update
+```
+
+`update` syncs core `assets` metadata and deterministic EXIF facts only. It does not generate captions/tags/OCR.
+
+### Facts
+
+```bash
+uv run qimg facts extract --caption --tags --objects --ocr
+uv run qimg facts ls qimg://photos/2024/trip.jpg
+uv run qimg facts rm --source legacy
+```
+
+### Embeddings
+
+```bash
+uv run qimg embed
+```
+
+### Retrieval
+
+- `qimg search "..."`: lexical only (contexts/facts/name-folder split)
+- `qimg vsearch "..."`: vector only
+- `qimg query "..."`: hybrid (query expansion + lexical + vector + RRF + optional rerank)
+
+Shared filters:
+
+- `-n/--num`
+- `-c/--collection`
+- `--path-prefix`
+- `--after YYYY-MM-DD`
+- `--before YYYY-MM-DD`
+- `--min-width`
+- `--min-height`
+- `--all`
+- `--min-score`
+
+Output modes:
+
+- default: path/id/score with context, caption, key EXIF
+- `--files`: TSV lines
+- `--json`: structured agent-first output with separated `contexts` and `facts`
+- `--debug` (search/query/vsearch/get/multi-get/similar): score channel breakdown
+
+## Ranking Semantics
+
+### Lexical search
+
+`search` computes split lexical signals:
+
+- `score_namefolder`
+- `score_context`
+- `score_facts`
+
+Combined score:
+
+```text
+total_lex_score = w_namefolder*score_namefolder + w_context*score_context + w_facts*score_facts
+```
+
+Default weights:
+
+- `w_namefolder = 1.0`
+- `w_context = 1.2`
+- `w_facts = 1.0`
+
+### Hybrid query
+
+`query` uses deterministic expansion:
+
+- original query (`x2` weight)
+- expansion #1 (object/detail oriented)
+- expansion #2 (style/scene oriented)
+
+For each expanded query:
+
+- lexical retrieval (with context/fact channel bias)
+- vector retrieval
+
+Fusion:
+
+- Reciprocal Rank Fusion (`k=60`) with top-rank bonuses
+- Optional rerank over contexts + facts + metadata
+
+## JSON Output Shape
+
+Each result includes:
+
+- `contexts`: `[ { virtual_path, text } ]`
+- `facts`: `{ caption, tags, objects, ocr, exif, derived }`
+- `metadata`: `{ collection, rel_path, abs_path, width, height, size, mtime, date, camera }`
+- `scores`: `{ overall, rrf, lexical_total, lexical_namefolder, lexical_context, lexical_facts, vector, rerank, contributions }`
+
+## MCP
+
+### stdio
+
+```bash
+uv run qimg mcp
+```
+
+Example request:
+
+```json
+{"tool":"qimg_deep_search","args":{"query":"minimalist white kitchen","num":5}}
+```
+
+### HTTP
+
+```bash
+uv run qimg mcp --http --host 127.0.0.1 --port 8181
+curl http://127.0.0.1:8181/health
+curl -X POST http://127.0.0.1:8181/mcp -H 'content-type: application/json' -d '{"tool":"qimg_status"}'
+```
+
+### Daemon
+
+```bash
+uv run qimg mcp --http --daemon
+uv run qimg mcp stop
+```
+
+Additional MCP tools:
+
+- `qimg_facts_extract`
+- `qimg_facts_get`
+
+## Storage Model
+
+Schema lives in `migrations/setup.sql`.
+
+Core tables:
+
+- `collections`
+- `assets`
+- `contexts`
+- `asset_context_effective`
+- `facts`
+- `lexical_docs`
+- `assets_fts`
+- `vectors`
+- `llm_cache`
+
+## Migration
+
+At startup, `qimg` initializes the new schema and auto-migrates legacy databases (`images`, `image_text`, `image_context_map`, `image_vectors`) into:
+
+- `assets`
+- `facts` (`source=legacy`)
+- `asset_context_effective`
+- `vectors`
+
+Then it rebuilds materialized lexical/context state.
+
+## Testing
+
+```bash
+uv run pytest
+```
+
+Includes tests for:
+
+- strict context inheritance
+- facts provenance/source removal
+- split FTS scoring
+- JSON query output schema
+- legacy migration backfill
